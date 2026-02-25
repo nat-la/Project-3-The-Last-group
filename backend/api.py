@@ -6,6 +6,10 @@ from typing import Optional
 from datetime import datetime, timezone, timedelta
 import random
 from fastapi.middleware.cors import CORSMiddleware
+import os, json, urllib.parse, urllib.request
+
+from dotenv import load_dotenv
+load_dotenv()
 
 # ------------------------------------------------------------
 # App setup
@@ -60,7 +64,9 @@ def init_db():
         CREATE TABLE IF NOT EXISTS locations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
-            address TEXT NOT NULL
+            address TEXT NOT NULL,
+            lat REAL,
+            lng REAL
         )
     """)
 
@@ -80,6 +86,14 @@ def init_db():
         FOREIGN KEY (destination_location_id) REFERENCES locations(id)
     )
 """)
+    
+    # migration: add lat/lng columns if they dont exist
+    cols = [r["name"] for r in cur.execute("PRAGMA table_info(locations)").fetchall()]
+    if "lat" not in cols:
+        cur.execute("ALTER TABLE locations ADD COLUMN lat REAL")
+    if "lng" not in cols:
+        cur.execute("ALTER TABLE locations ADD COLUMN lng REAL")
+
     conn.commit()
     conn.close()
 
@@ -108,6 +122,8 @@ class LocationCreate(BaseModel):
     """    
     name: str
     address: str
+    lat: Optional[float] = None
+    lng: Optional[float] = None
 
 class Location(LocationCreate):
     """
@@ -162,13 +178,25 @@ def create_location(location_in: LocationCreate):
     """
     conn = get_conn() # set var conn equal to server connection
     cur = conn.cursor() # set var cur equal to cursor for server
-    cur.execute("INSERT INTO locations (name, address) VALUES (?, ?)",
-                (location_in.name, location_in.address),
+
+    # if lat and lng not provided
+    lat = location_in.lat
+    lng = location_in.lng
+    address = location_in.address
+    
+    if lat is None or lng is None:
+        try:
+            lat, lng, address = geocode_address(address)
+        except HTTPException:
+            lat, lng = None, None
+            
+    cur.execute("INSERT INTO locations (name, address, lat, lng) VALUES (?, ?, ?, ?)",
+                (location_in.name, address, lat, lng),
     )
     conn.commit() # save changes to disk (if forgotten, data not saved)
     new_id = cur.lastrowid # autogenerate id
     conn.close() # close database connection
-    return Location(id=new_id, **location_in.model_dump())
+    return Location(id=new_id, name=location_in.name, address=address, lat=lat, lng=lng)
 
 # get location
 @app.get("/locations", response_model=list[Location])
@@ -181,9 +209,9 @@ def get_locations():
     """
     conn = get_conn() # get connection to database
     cur = conn.cursor() # get cursor for database
-    rows = cur.execute("SELECT id, name, address FROM locations ORDER BY id").fetchall()
+    rows = cur.execute("SELECT id, name, address, lat, lng FROM locations ORDER BY id").fetchall()
     conn.close() # close connection
-    return [Location(id=row["id"], name=row["name"], address=row["address"]) for row in rows]
+    return [Location(id=row["id"], name=row["name"], address=row["address"], lat=row["lat"], lng=row["lng"]) for row in rows]
 
 #get location from id
 @app.get("/locations/{location_id}", response_model=Location)
@@ -196,7 +224,7 @@ def get_location(location_id: int):
     """
     conn = get_conn()
     cur = conn.cursor()
-    row = cur.execute("SELECT id, name, address FROM locations WHERE id = ?",
+    row = cur.execute("SELECT id, name, address, lat, lng FROM locations WHERE id = ?",
                       (location_id,),
     ).fetchone()
     conn.close()
@@ -204,7 +232,12 @@ def get_location(location_id: int):
     if row is None:
         raise HTTPException(status_code=404, detail="Location not found")
     
-    return Location(id=row["id"], name=row["name"], address=row["address"])
+    return Location(id=row["id"],
+                    name=row["name"], 
+                    address=row["address"], 
+                    lat=row["lat"], 
+                    lng=["lng"]
+    )
 
 # delete locaiton
 @app.delete("/locations/{location_id}")
@@ -243,8 +276,11 @@ def update_location(location_id: int, location_in: LocationCreate):
     """
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE locations SET name = ?, address = ? WHERE id = ?",
-        (location_in.name, location_in.address, location_id),)
+    cur.execute(
+    "UPDATE locations SET name=?, address=?, lat=?, lng=?, WHERE id=?",
+        (location_in.name, location_in.address, location_in.lat, location_in.lng, location_id),
+    )
+
     conn.commit()
     changed = cur.rowcount
     conn.close()
@@ -260,7 +296,7 @@ def update_location(location_id: int, location_in: LocationCreate):
 
 # create commute
 @app.post("/commutes", response_model=Commute)
-def creat_commute(commute_in: CommuteCreate):
+def create_commute(commute_in: CommuteCreate):
     """
     Create a commute record.
 
@@ -516,7 +552,7 @@ def analytics_by_weekday():
 
     rows = cur.execute("""
         SELECT
-            strftime('%w', started_at) AS weekday_num,
+            strftime('%w', datetime(started_at)) AS weekday_num,
             COUNT(*) AS n,
             AVG(actual_minutes) AS avg_actual,
             AVG(estimated_minutes) AS avg_estimated,
@@ -581,7 +617,7 @@ def analytics_recommendations():
 
     rows = cur.execute("""
         SELECT
-            strftime('%w', started_at) AS weekday_num,
+            strftime('%w', datetime(started_at)) AS weekday_num,
             COUNT(*) AS n,
             AVG(actual_minutes) AS avg_actual
         FROM commutes
@@ -840,3 +876,148 @@ def recommendations_by_route_hour(
 
     items.sort(key=lambda x: x["percent_worse_than_estimated"], reverse=True)
     return items[:top]
+
+# all route stats
+@app.get("/analytics/route-stats")
+def route_stats(origin_id: int = Query(..., ge=1), destination_id: int = Query(..., ge=1)):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    row = cur.execute("""
+        SELECT
+            COUNT(*) AS n,
+            AVG(estimated_minutes) AS avg_est,
+            AVG(actual_minutes) AS avg_act
+        FROM commutes
+        WHERE origin_location_id = ? AND destination_location_id = ?
+    """, (origin_id, destination_id)).fetchone()
+
+    conn.close()
+
+    n = int(row["n"] or 0)
+    if n == 0:
+        return {
+            "origin_location_id": origin_id,
+            "destination_location_id": destination_id,
+            "count": 0,
+            "avg_estimated_minutes": None,
+            "avg_actual_minutes": None,
+            "percent_worse_than_estimated": None,
+        }
+    
+    avg_est = float(row["avg_est"])
+    avg_act = float(row["avg_act"])
+    pct_over = ((avg_act / avg_est) - 1.0) * 100 if avg_est > 0 else None
+
+    return {
+        "origin_location_id": origin_id,
+        "destination_location_id": destination_id,
+        "count": n,
+        "avg_estimated_minutes": round(avg_est, 2),
+        "avg_actual_minutes": round(avg_act, 2),
+        "percent_worse_than_estimated": round(pct_over, 1) if pct_over is not None else None,
+    }
+
+# ------------------------------------------------------------
+# Google API integration
+# ------------------------------------------------------------
+
+GOOGLE_GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
+def geocode_address(address: str) -> tuple[float, float, str]:
+    """
+    Uses Google Geocoding API to convert an address into (lat, lng, formatted_address).
+    Raises HTTPException on failures.
+    """
+    api_key = os.environ.get("GOOGLE_MAPS_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="Server missing GOOGLE_MAPS_API_KEY")
+
+    params = {
+        "address": address,
+        "key": api_key,
+    }
+    url = GOOGLE_GEOCODE_URL + "?" + urllib.parse.urlencode(params)
+
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Geocoding request failed: {e}")
+
+    status = payload.get("status")
+    if status != "OK":
+        # Common statuses: ZERO_RESULTS, OVER_QUERY_LIMIT, REQUEST_DENIED, INVALID_REQUEST
+        raise HTTPException(status_code=400, detail=f"Geocoding failed: {status}")
+
+    result = payload["results"][0]
+    loc = result["geometry"]["location"]
+    lat = float(loc["lat"])
+    lng = float(loc["lng"])
+    formatted = result.get("formatted_address", address)
+
+    return lat, lng, formatted
+
+GOOGLE_ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
+def get_route_polyline(origin_lat: float, origin_lng: float, dest_lat: float, dest_lng: float) -> str:
+    api_key = os.environ.get("GOOGLE_MAPS_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="Server missing GOOGLE_MAPS_API_KEY")
+
+    body = {
+        "origin": {"location": {"latLng": {"latitude": origin_lat, "longitude": origin_lng}}},
+        "destination": {"location": {"latLng": {"latitude": dest_lat, "longitude": dest_lng}}},
+        "travelMode": "DRIVE",
+        "polylineQuality": "OVERVIEW",
+        "polylineEncoding": "ENCODED_POLYLINE",
+    }
+
+    req = urllib.request.Request(
+        GOOGLE_ROUTES_URL,
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": api_key,
+            # Field mask: only return what we need
+            "X-Goog-FieldMask": "routes.polyline.encodedPolyline,routes.duration,routes.distanceMeters",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Routes API request failed: {e}")
+
+    routes = payload.get("routes", [])
+    if not routes:
+        raise HTTPException(status_code=400, detail="No route found")
+
+    encoded = routes[0]["polyline"]["encodedPolyline"]
+    return encoded
+
+# Endpoint to get route polyline between two locations
+@app.get("/routes/polyline")
+def route_polyline(origin_id: int = Query(..., ge=1), destination_id: int = Query(..., ge=1)):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    o = cur.execute(
+        "SELECT id, lat, lng FROM locations WHERE id=?",
+        (origin_id,),
+    ).fetchone()
+    d = cur.execute(
+        "SELECT id, lat, lng FROM locations WHERE id=?",
+        (destination_id,),
+    ).fetchone()
+
+    conn.close()
+
+    if o is None or d is None:
+        raise HTTPException(status_code=404, detail="Origin or destination location not found")
+
+    if o["lat"] is None or o["lng"] is None or d["lat"] is None or d["lng"] is None:
+        raise HTTPException(status_code=400, detail="Origin/destination missing lat/lng (geocode the locations first)")
+
+    encoded = get_route_polyline(o["lat"], o["lng"], d["lat"], d["lng"])
+    return {"origin_id": origin_id, "destination_id": destination_id, "encoded_polyline": encoded}

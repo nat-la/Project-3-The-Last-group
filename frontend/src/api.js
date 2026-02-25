@@ -36,5 +36,10 @@ export const api = {
     recommendationsByRouteHour: (pct = 0.15, min = 5, top = 20) =>
     request(`/analytics/recommendations-by-route-hour?pct_threshold=${pct}&min_samples=${min}&top=${top}`),
 
+  routeStats: (originId, destinationId) =>
+    request(`/analytics/route-stats?origin_id=${originId}&destination_id=${destinationId}`),
 
+  routePolyline: (originId, destinationId) =>
+    request(`/routes/polyline?origin_id=${originId}&destination_id=${destinationId}`),
+  
 };
