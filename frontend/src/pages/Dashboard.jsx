@@ -1,11 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import { Alert, KPI, PageHeader } from "../components/ui";
+import { useNavigate } from "react-router-dom";
 
 export default function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [byHour, setByHour] = useState(null);
   const [routeRecs, setRouteRecs] = useState(null);
   const [error, setError] = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
     (async () => {
@@ -19,53 +22,96 @@ export default function Dashboard() {
         setByHour(hour);
         setRouteRecs(recs);
       } catch (e) {
-        setError(String(e.message || e));
+        setError(String(e?.message || e));
       }
     })();
   }, []);
 
-  // simple “best hour” + “worst hour” from byHour
-  let best = null, worst = null;
-  if (byHour && byHour.length) {
-    best = [...byHour].sort((a, b) => a.avg_delay_minutes - b.avg_delay_minutes)[0];
-    worst = [...byHour].sort((a, b) => b.avg_delay_minutes - a.avg_delay_minutes)[0];
-  }
+  const { best, worst } = useMemo(() => {
+    if (!byHour?.length) return { best: null, worst: null };
+    const sortedAsc = [...byHour].sort((a, b) => a.avg_delay_minutes - b.avg_delay_minutes);
+    const sortedDesc = [...byHour].sort((a, b) => b.avg_delay_minutes - a.avg_delay_minutes);
+    return { best: sortedAsc[0], worst: sortedDesc[0] };
+  }, [byHour]);
+
+  const padHour = (h) => `${String(h).padStart(2, "0")}:00`;
 
   return (
-    <div style={{ padding: 20 }}>
-      <h1>Dashboard</h1>
-      {error && <div style={{ background: "#fee", padding: 10 }}>{error}</div>}
+    <div className="page">
 
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <Card title="Avg Commute Time" value={summary ? `${summary.avg_actual_minutes} min` : "…"} subtitle="Based on all commutes" />
-        <Card title="Worst Hour" value={worst ? `${String(worst.hour).padStart(2,"0")}:00` : "…"} subtitle={worst ? `Avg delay ${worst.avg_delay_minutes} min` : ""} />
-        <Card title="Best Hour" value={best ? `${String(best.hour).padStart(2,"0")}:00` : "…"} subtitle={best ? `Avg delay ${best.avg_delay_minutes} min` : ""} />
+      <div style={{ height: 340 }} />
+
+      <PageHeader
+        title="Master Your Daily Commute"
+        subtitle="Analyze historical traffic trends to reclaim your time. CommuteWise helps you find the best departure window based on long-term data."
+        right={
+          <>
+            <button className="btn btnPrimary" onClick={() => navigate("/analyze")}>
+              Analyze commute
+            </button>
+
+            <button className="btn" onClick={() => navigate("/locations")}>
+              Add location
+            </button>
+          </>
+        }
+      />
+
+      {error && <Alert>{error}</Alert>}
+
+      <div className="grid3">
+        <KPI
+          label="Avg. Commute Time"
+          value={summary ? `${summary.avg_actual_minutes} min` : "…"}
+          sub="Based on all commutes"
+        />
+        <KPI
+          label="Worst Congestion"
+          value={worst ? padHour(worst.hour) : "…"}
+          sub={worst ? `Avg delay ${worst.avg_delay_minutes} min` : " "}
+        />
+        <KPI
+          label="Best Window"
+          value={best ? padHour(best.hour) : "…"}
+          sub={best ? `Save ~${Math.max(0, worst?.avg_delay_minutes - best.avg_delay_minutes)} min vs worst` : " "}
+        />
       </div>
 
-      <h2 style={{ marginTop: 24 }}>Top Route Issues</h2>
-      {!routeRecs ? (
-        <p>Loading…</p>
-      ) : routeRecs.length === 0 ? (
-        <p>No flagged routes yet.</p>
-      ) : (
-        <ul>
-          {routeRecs.slice(0, 5).map((r, i) => (
-            <li key={i}>
-              Route {r.origin_location_id} → {r.destination_location_id}: {r.percent_worse_than_estimated}% worse
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
+      <div className="panel panelPad" style={{ marginTop: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <div>
+            <div className="sectionTitle" style={{ marginBottom: 4 }}>Top Route Issues</div>
+            <div className="muted">Routes with consistently higher actual time vs estimate.</div>
+          </div>
+          <button className="btn" onClick={() => navigate("/locations")}>
+              Manage locations
+            </button>
+        </div>
 
-function Card({ title, value, subtitle }) {
-  return (
-    <div style={{ border: "1px solid #ddd", borderRadius: 10, padding: 14, width: 260 }}>
-      <div style={{ fontSize: 12, opacity: 0.7 }}>{title}</div>
-      <div style={{ fontSize: 26, fontWeight: 700 }}>{value}</div>
-      <div style={{ fontSize: 12, opacity: 0.7 }}>{subtitle}</div>
+        <hr className="hr" />
+
+        {!routeRecs ? (
+          <p className="muted">Loading…</p>
+        ) : routeRecs.length === 0 ? (
+          <p className="muted">No flagged routes yet.</p>
+        ) : (
+          <div style={{ display: "grid", gap: 10 }}>
+            {routeRecs.slice(0, 5).map((r, i) => (
+              <div key={i} className="panel" style={{ padding: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                  <div style={{ fontWeight: 900 }}>
+                    Route {r.origin_location_id} → {r.destination_location_id}
+                  </div>
+                  <span className="badge">{r.percent_worse_than_estimated}% worse</span>
+                </div>
+                <div className="muted" style={{ marginTop: 4 }}>
+                  Higher-than-expected travel time detected from historical samples.
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

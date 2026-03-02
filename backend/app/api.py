@@ -7,9 +7,11 @@ from datetime import datetime, timezone, timedelta
 import random
 from fastapi.middleware.cors import CORSMiddleware
 import os, json, urllib.parse, urllib.request
-
+from pathlib import Path
 from dotenv import load_dotenv
-load_dotenv()
+
+ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(ENV_PATH)
 
 # ------------------------------------------------------------
 # App setup
@@ -17,9 +19,6 @@ load_dotenv()
 
 app = FastAPI()
 
-# CORS configuration:
-# Browsers block frontend -> backend calls by default if origins differ.
-# Since your frontend runs on http://localhost:5173, we allow it here.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
@@ -29,7 +28,8 @@ app.add_middleware(
 )
 
 # SQLite DB file location (stored on disk in project directory)
-DB_PATH = "app.db"
+# DB_PATH = "app.db"
+DB_PATH = str(Path(__file__).resolve().parent / "app.db")
 
 # ------------------------------------------------------------
 # Database helpers
@@ -44,6 +44,7 @@ def get_conn():
     """
     
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON")
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -87,11 +88,17 @@ def init_db():
     )
 """)
     
-    # migration: add lat/lng columns if they dont exist
-    cols = [r["name"] for r in cur.execute("PRAGMA table_info(locations)").fetchall()]
-    if "lat" not in cols:
+
+    # Add api_estimated_minutes to commutes if missing
+    commute_cols = [r["name"] for r in cur.execute("PRAGMA table_info(commutes)").fetchall()]
+    if "api_estimated_minutes" not in commute_cols:
+        cur.execute("ALTER TABLE commutes ADD COLUMN api_estimated_minutes INTEGER")
+
+    # Add lat/lng to locations if missing (older DBs)
+    location_cols = [r["name"] for r in cur.execute("PRAGMA table_info(locations)").fetchall()]
+    if "lat" not in location_cols:
         cur.execute("ALTER TABLE locations ADD COLUMN lat REAL")
-    if "lng" not in cols:
+    if "lng" not in location_cols:
         cur.execute("ALTER TABLE locations ADD COLUMN lng REAL")
 
     conn.commit()
@@ -143,9 +150,10 @@ class CommuteCreate(BaseModel):
     origin_location_id: int
     destination_location_id: int
     mode: str = "driving"
-    estimated_minutes: int
+    estimated_minutes: Optional[int] = None
     actual_minutes: int
     started_at: Optional[datetime] = None
+    use_api_estimate: bool = True
 
 class Commute(CommuteCreate):
     """Response model for commutes (includes id)."""
@@ -162,6 +170,15 @@ def root():
 @app.post("/echo")
 def echo(data: Echo):
     return {"you_sent": data.message}
+
+@app.get("/health")
+def health():
+    required = ["GOOGLE_MAPS_API_KEY"]
+    missing = [k for k in required if not os.getenv(k)]
+    return {
+        "ok": len(missing) == 0,
+        "missing": missing
+    }
 
 # ------------------------------------------------------------
 # Location endpoints (CRUD)
@@ -236,7 +253,7 @@ def get_location(location_id: int):
                     name=row["name"], 
                     address=row["address"], 
                     lat=row["lat"], 
-                    lng=["lng"]
+                    lng=row["lng"]
     )
 
 # delete locaiton
@@ -256,6 +273,16 @@ def delete_location(location_id: int):
     """
     conn = get_conn()
     cur = conn.cursor()
+
+    ref = cur.execute(
+        "SELECT COUNT(*) AS n FROM commutes WHERE origin_location_id=? OR destination_location_id=?",
+        (location_id, location_id),
+    ).fetchone()
+
+    if ref["n"] > 0:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Cannot delete: location is used by existing commutes")
+
     cur.execute("DELETE FROM locations WHERE id = ?", (location_id,))
     conn.commit()
     deleted = cur.rowcount
@@ -277,7 +304,7 @@ def update_location(location_id: int, location_in: LocationCreate):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-    "UPDATE locations SET name=?, address=?, lat=?, lng=?, WHERE id=?",
+    "UPDATE locations SET name=?, address=?, lat=?, lng=? WHERE id=?",
         (location_in.name, location_in.address, location_in.lat, location_in.lng, location_id),
     )
 
@@ -307,44 +334,64 @@ def create_commute(commute_in: CommuteCreate):
     started_at:
     - If not provided, defaults to current UTC time.
     """
-    if commute_in.estimated_minutes <= 0 or commute_in.actual_minutes <= 0:
-        raise HTTPException(status_code=400, detail="Minutes must be positive")
-    
-    started_at = commute_in.started_at or datetime.now(timezone.utc)
+    @app.post("/commutes", response_model=Commute)
+    def create_commute(commute_in: CommuteCreate):
+        if commute_in.actual_minutes <= 0:
+            raise HTTPException(status_code=400, detail="Actual minutes must be positive")
 
-    conn = get_conn()
-    cur = conn.cursor()
+        started_at = commute_in.started_at or datetime.now(timezone.utc)
 
-    origin = cur.execute("SELECT id FROM locations WHERE id = ?", (commute_in.origin_location_id,)).fetchone()
-    dest = cur.execute("SELECT id FROM locations WHERE id = ?", (commute_in.destination_location_id,)).fetchone()
+        conn = get_conn()
+        cur = conn.cursor()
 
-    if origin is None or dest is None:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Origin or destination location not found")
-    
-    cur.execute("""
-        INSERT INTO commutes (
-            origin_location_id, destination_location_id, mode,
-            estimated_minutes, actual_minutes, started_at
-        ) VALUES (?, ?, ?, ?, ?, ?)
+        origin = cur.execute("SELECT id, lat, lng FROM locations WHERE id = ?", (commute_in.origin_location_id,)).fetchone()
+        dest = cur.execute("SELECT id, lat, lng FROM locations WHERE id = ?", (commute_in.destination_location_id,)).fetchone()
+
+        if origin is None or dest is None:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Origin or destination location not found")
+
+        # Decide estimate:
+        api_est_minutes = None
+        est_minutes = commute_in.estimated_minutes
+
+        if commute_in.use_api_estimate:
+            if origin["lat"] is None or origin["lng"] is None or dest["lat"] is None or dest["lng"] is None:
+                conn.close()
+                raise HTTPException(status_code=400, detail="Origin/destination missing lat/lng for API estimate")
+
+            _, _, duration_s = get_route_info(origin["lat"], origin["lng"], dest["lat"], dest["lng"])
+            api_est_minutes = max(1, int(round(duration_s / 60)))
+            est_minutes = api_est_minutes
+
+        if est_minutes is None or est_minutes <= 0:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Estimated minutes must be positive (or enable use_api_estimate)")
+
+        cur.execute("""
+            INSERT INTO commutes (
+                origin_location_id, destination_location_id, mode,
+                estimated_minutes, actual_minutes, started_at, api_estimated_minutes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
             commute_in.origin_location_id,
             commute_in.destination_location_id,
             commute_in.mode,
-            commute_in.estimated_minutes,
+            est_minutes,
             commute_in.actual_minutes,
             started_at.isoformat(),
-        ),
-    )
+            api_est_minutes,
+        ))
 
-    conn.commit()
-    new_id = cur.lastrowid
-    conn.close()
+        conn.commit()
+        new_id = cur.lastrowid
+        conn.close()
 
-    data = commute_in.model_dump()
-    data["started_at"] = started_at
+        data = commute_in.model_dump()
+        data["started_at"] = started_at
+        data["estimated_minutes"] = est_minutes  # ensure it reflects API if used
 
-    return Commute(id=new_id, **data)
+        return Commute(id=new_id, **data)
 
 # display commutes
 @app.get("/commutes", response_model=list[Commute])
@@ -811,7 +858,10 @@ def analytics_by_hour():
 def recommendations_by_route_hour(
     pct_threshold: float = Query(0.15, ge=0.01, le=1.00),
     min_samples: int = Query(5, ge=1, le=200),
-    top: int = Query(10, ge=1, le=50)):
+    top: int = Query(10, ge=1, le=50),
+    origin_id: int | None = Query(None, ge=1),
+    destination_id: int | None = Query(None, ge=1),
+):
     """
     Route + hour recommendations.
 
@@ -830,7 +880,14 @@ def recommendations_by_route_hour(
     conn = get_conn()
     cur = conn.cursor()
 
-    rows = cur.execute("""
+    where = ""
+    params: list = [min_samples]
+
+    if origin_id is not None and destination_id is not None:
+        where = "WHERE origin_location_id = ? AND destination_location_id = ?"
+        params = [origin_id, destination_id, min_samples]
+
+    rows = cur.execute(f"""
         SELECT
             origin_location_id,
             destination_location_id,
@@ -839,9 +896,10 @@ def recommendations_by_route_hour(
             AVG(estimated_minutes) AS avg_est,
             AVG(actual_minutes) AS avg_act
         FROM commutes
+        {where}
         GROUP BY origin_location_id, destination_location_id, hour
         HAVING COUNT(*) >= ?
-    """, (min_samples, )).fetchall()
+    """, tuple(params)).fetchall()
 
     conn.close()
 
@@ -856,8 +914,10 @@ def recommendations_by_route_hour(
         pct_over = (ratio - 1.0) * 100.0
         is_flagged = ratio >= (1.0 + pct_threshold)
 
-        if not is_flagged: # only return flagged items 
-            continue
+        # Only filter flagged results in global mode
+        if origin_id is None or destination_id is None:
+            if not is_flagged:
+                continue
 
         hour = int(r["hour"])
         items.append({
@@ -958,7 +1018,7 @@ def geocode_address(address: str) -> tuple[float, float, str]:
     return lat, lng, formatted
 
 GOOGLE_ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
-def get_route_polyline(origin_lat: float, origin_lng: float, dest_lat: float, dest_lng: float) -> str:
+def get_route_info(origin_lat: float, origin_lng: float, dest_lat: float, dest_lng: float):
     api_key = os.environ.get("GOOGLE_MAPS_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="Server missing GOOGLE_MAPS_API_KEY")
@@ -977,47 +1037,49 @@ def get_route_polyline(origin_lat: float, origin_lng: float, dest_lat: float, de
         headers={
             "Content-Type": "application/json",
             "X-Goog-Api-Key": api_key,
-            # Field mask: only return what we need
             "X-Goog-FieldMask": "routes.polyline.encodedPolyline,routes.duration,routes.distanceMeters",
         },
         method="POST",
     )
 
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Routes API request failed: {e}")
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
 
     routes = payload.get("routes", [])
     if not routes:
         raise HTTPException(status_code=400, detail="No route found")
 
-    encoded = routes[0]["polyline"]["encodedPolyline"]
-    return encoded
+    r0 = routes[0]
+    encoded = r0["polyline"]["encodedPolyline"]
+    distance_m = int(r0.get("distanceMeters", 0))
+
+    dur_str = r0.get("duration", "0s")
+    duration_s = int(dur_str[:-1]) if isinstance(dur_str, str) and dur_str.endswith("s") else 0
+
+    return encoded, distance_m, duration_s
 
 # Endpoint to get route polyline between two locations
-@app.get("/routes/polyline")
-def route_polyline(origin_id: int = Query(..., ge=1), destination_id: int = Query(..., ge=1)):
+@app.get("/routes/info")
+def route_info(origin_id: int = Query(..., ge=1), destination_id: int = Query(..., ge=1)):
     conn = get_conn()
     cur = conn.cursor()
 
-    o = cur.execute(
-        "SELECT id, lat, lng FROM locations WHERE id=?",
-        (origin_id,),
-    ).fetchone()
-    d = cur.execute(
-        "SELECT id, lat, lng FROM locations WHERE id=?",
-        (destination_id,),
-    ).fetchone()
-
+    o = cur.execute("SELECT lat, lng FROM locations WHERE id=?", (origin_id,)).fetchone()
+    d = cur.execute("SELECT lat, lng FROM locations WHERE id=?", (destination_id,)).fetchone()
     conn.close()
 
     if o is None or d is None:
         raise HTTPException(status_code=404, detail="Origin or destination location not found")
 
     if o["lat"] is None or o["lng"] is None or d["lat"] is None or d["lng"] is None:
-        raise HTTPException(status_code=400, detail="Origin/destination missing lat/lng (geocode the locations first)")
+        raise HTTPException(status_code=400, detail="Origin/destination missing lat/lng")
 
-    encoded = get_route_polyline(o["lat"], o["lng"], d["lat"], d["lng"])
-    return {"origin_id": origin_id, "destination_id": destination_id, "encoded_polyline": encoded}
+    encoded, distance_m, duration_s = get_route_info(o["lat"], o["lng"], d["lat"], d["lng"])
+
+    return {
+        "origin_id": origin_id,
+        "destination_id": destination_id,
+        "encoded_polyline": encoded,
+        "distance_meters": distance_m,
+        "duration_seconds": duration_s,
+    }
