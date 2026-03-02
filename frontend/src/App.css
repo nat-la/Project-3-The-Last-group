@@ -1,23 +1,44 @@
+/**
+ * Default Vite/React scaffold styles
+ *
+ * Notes:
+ * - These are mostly demo/placeholder styles from the Vite template.
+ * - Many are likely unused in your current app (e.g., .logo, .card).
+ * - Some rules (like #root padding + text-align) may conflict with your custom layout.
+ */
+
 #root {
+  /* Centers the app and constrains max width (may conflict with .page layout) */
   max-width: 1280px;
   margin: 0 auto;
+
+  /* Global padding applied to entire app */
   padding: 2rem;
+
+  /* Forces all text centered unless overridden (can cause layout issues) */
   text-align: center;
 }
 
+/* Demo logo styling (likely unused unless you kept the Vite splash UI) */
 .logo {
   height: 6em;
   padding: 1.5em;
+
+  /* Hint for browser optimization (GPU acceleration for filter changes) */
   will-change: filter;
+
   transition: filter 300ms;
 }
 .logo:hover {
   filter: drop-shadow(0 0 2em #646cffaa);
 }
+
+/* Variant for React logo */
 .logo.react:hover {
   filter: drop-shadow(0 0 2em #61dafbaa);
 }
 
+/* Keyframe animation for spinning logo */
 @keyframes logo-spin {
   from {
     transform: rotate(0deg);
@@ -27,16 +48,19 @@
   }
 }
 
+/* Applies spin animation only if user allows motion (accessibility-aware) */
 @media (prefers-reduced-motion: no-preference) {
   a:nth-of-type(2) .logo {
     animation: logo-spin infinite 20s linear;
   }
 }
 
+/* Generic card style from template (not aligned with your .panel system) */
 .card {
   padding: 2em;
 }
 
+/* Subtle muted text style (unused; you already have .muted) */
 .read-the-docs {
   color: #888;
 }

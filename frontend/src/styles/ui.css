@@ -1,19 +1,35 @@
+/**
+ * Global theme + layout styles
+ *
+ * Structure:
+ * - CSS variables define the design system (colors, spacing, shadows, radii)
+ * - Generic “panel” primitives compose most UI surfaces
+ * - Page/layout utilities: .page, .split, .grid3, etc.
+ * - Form + button primitives: .field, .input, .select, .btn
+ * - Navbar is fixed; .appMain uses --navH to offset content below it
+ */
+
 :root{
-  --bg: #f6f8fc;
-  --panel: #ffffff;
-  --text: #0f172a;
-  --muted: #64748b;
-  --border: #e6ebf2;
-  --blue: #2563eb;
-  --blue-600:#1d4ed8;
+  /* Design tokens (theme) */
+  --bg: #f6f8fc;                 /* app background */
+  --panel: #ffffff;              /* card/panel background */
+  --text: #0f172a;               /* primary text color */
+  --muted: #64748b;              /* secondary text color */
+  --border: #e6ebf2;             /* neutral border color */
+  --blue: #2563eb;               /* primary brand accent */
+  --blue-600:#1d4ed8;            /* primary hover shade */
   --shadow: 0 12px 30px rgba(2,6,23,0.06);
   --shadow-sm: 0 6px 16px rgba(2,6,23,0.06);
   --radius: 14px;
   --radius-sm: 12px;
-  --ring: 0 0 0 4px rgba(37,99,235,0.15);
+  --ring: 0 0 0 4px rgba(37,99,235,0.15); /* focus ring */
   --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
-  --navH: 0px;  
+
+  /* Intended to match the fixed navbar height; set dynamically in JS or by hand */
+  --navH: 0px;
 }
+
+/* Base reset / defaults */
 *{ box-sizing:border-box; }
 html, body{ height:100%; }
 body{
@@ -23,11 +39,15 @@ body{
   color:var(--text);
 }
 a{ color:inherit; text-decoration:none; }
+
+/* Page container: centers content and gives consistent padding */
 .page{
   padding: 18px 20px 28px;
   max-width: 1120px;
   margin: 0 auto;
 }
+
+/* Legacy(?) page title/subtitle styles (not used by PageHeader, which uses heroTitle/heroText) */
 .pageTitle{
   margin: 0 0 6px;
   font-size: 18px;
@@ -39,6 +59,8 @@ a{ color:inherit; text-decoration:none; }
   color: var(--muted);
   font-size: 13px;
 }
+
+/* Panel primitive: most surfaces inherit from this */
 .panel{
   background: var(--panel);
   border: 1px solid var(--border);
@@ -46,6 +68,8 @@ a{ color:inherit; text-decoration:none; }
   box-shadow: var(--shadow-sm);
 }
 .panelPad{ padding: 16px; }
+
+/* PageHeader “hero” layout */
 .hero{
   display:flex;
   align-items:center;
@@ -71,6 +95,8 @@ a{ color:inherit; text-decoration:none; }
   gap: 10px;
   flex-wrap: wrap;
 }
+
+/* 3-up KPI grid; collapses to 1 column on smaller screens */
 .grid3{
   margin-top: 14px;
   display:grid;
@@ -80,9 +106,9 @@ a{ color:inherit; text-decoration:none; }
 @media (max-width: 920px){
   .grid3{ grid-template-columns: 1fr; }
 }
-.kpi{
-  padding: 14px;
-}
+
+/* KPI card layout */
+.kpi{ padding: 14px; }
 .kpiTop{
   display:flex;
   align-items:center;
@@ -104,6 +130,8 @@ a{ color:inherit; text-decoration:none; }
   color: var(--muted);
   font-size: 12px;
 }
+
+/* 2-column form row pattern (collapses to 1 column on smaller screens) */
 .formRow{
   display:grid;
   grid-template-columns: 1fr 1fr;
@@ -112,6 +140,8 @@ a{ color:inherit; text-decoration:none; }
 @media (max-width: 920px){
   .formRow{ grid-template-columns: 1fr; }
 }
+
+/* Form field label */
 .field label{
   display:block;
   font-size: 12px;
@@ -119,6 +149,8 @@ a{ color:inherit; text-decoration:none; }
   margin-bottom: 6px;
   font-weight: 700;
 }
+
+/* Text input + select primitive styling */
 .input, .select{
   width: 100%;
   border: 1px solid var(--border);
@@ -133,6 +165,8 @@ a{ color:inherit; text-decoration:none; }
   border-color: rgba(37,99,235,0.55);
   box-shadow: var(--ring);
 }
+
+/* Button primitive */
 .btn{
   border: 1px solid var(--border);
   background: #ffffff;
@@ -145,13 +179,19 @@ a{ color:inherit; text-decoration:none; }
 }
 .btn:hover{ transform: translateY(-1px); background:#f8fbff; }
 .btn:active{ transform: translateY(0px); }
+
+/* Primary button variant */
 .btnPrimary{
   border-color: rgba(37,99,235,0.25);
   background: var(--blue);
   color: white;
 }
 .btnPrimary:hover{ background: var(--blue-600); }
+
+/* Utility for full-width buttons */
 .btnWide{ width: 100%; padding: 12px 14px; }
+
+/* Alert banner */
 .alert{
   margin-top: 12px;
   border: 1px solid rgba(239,68,68,0.35);
@@ -161,7 +201,11 @@ a{ color:inherit; text-decoration:none; }
   border-radius: 12px;
   font-size: 13px;
 }
+
+/* Generic “muted” text utility */
 .muted{ color: var(--muted); font-size: 13px; }
+
+/* Locations grid (responsive auto-fit cards) */
 .locGrid{
   display:grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -185,6 +229,8 @@ a{ color:inherit; text-decoration:none; }
   font-size: 12px;
   line-height: 1.35;
 }
+
+/* Pill/badge primitive */
 .badge{
   display:inline-flex;
   align-items:center;
@@ -197,6 +243,11 @@ a{ color:inherit; text-decoration:none; }
   color: var(--muted);
   background: #f8fbff;
 }
+
+/**
+ * Split layout used on Analyze: fixed left column and flexible right column.
+ * NOTE: overflow-y here only affects this grid container, not the whole page.
+ */
 .split{
   display:grid;
   grid-template-columns: 380px 1fr;
@@ -207,6 +258,8 @@ a{ color:inherit; text-decoration:none; }
 @media (max-width: 980px){
   .split{ grid-template-columns: 1fr; }
 }
+
+/* Section headings + separators */
 .sectionTitle{
   margin: 0 0 10px;
   font-size: 13px;
@@ -219,6 +272,8 @@ a{ color:inherit; text-decoration:none; }
   border:0;
   margin: 12px 0;
 }
+
+/* Informational note callout (blue-tinted) */
 .note{
   margin-top: 12px;
   padding: 12px;
@@ -228,6 +283,8 @@ a{ color:inherit; text-decoration:none; }
   color: #1e3a8a;
   font-size: 12px;
 }
+
+/* NavLink hover/active states */
 .navlink:hover {
   background: rgba(37,99,235,0.06);
 }
@@ -235,17 +292,29 @@ a{ color:inherit; text-decoration:none; }
   background: rgba(37,99,235,0.12);
   color: var(--blue);
 }
+
+/* App shell wrapper; ensures page background covers full viewport height */
 .appShell {
   min-height: 100vh;
 }
+
+/* Prevent horizontal scroll bars due to fixed widths / leaflet / etc. */
 html, body {
   overflow-x: hidden;
 }
+
+/**
+ * Navbar: fixed at top of viewport.
+ * - Requires content below to be offset (see .appMain padding-top: var(--navH))
+ * - width calc references --scrollbar-width, which must be defined somewhere else,
+ *   otherwise calc(100vw - var(--scrollbar-width)) can evaluate oddly in some browsers.
+ */
 .navbar{
   scrollbar-gutter: stable;
 
   position: fixed;
-  top: 0; left: 0; right: 0; width: calc(100vw - var(--scrollbar-width));
+  top: 0; left: 0; right: 0;
+  width: calc(100vw - var(--scrollbar-width));
   z-index: 1000;
 
   background: #ffffff;
@@ -258,10 +327,16 @@ html, body {
   justify-content: space-between;
   flex-wrap: nowrap;
 }
+
+/* Main content wrapper; offset from fixed navbar using a CSS variable */
 .appMain{
   padding-top: var(--navH);
 }
+
+/* Ensure root spans full width and doesn't create horizontal overflow */
 html, body, #root { width: 100%; overflow-x: hidden; }
+
+/* Nav link base style */
 .navlink {
   padding: 6px 10px;
   border-radius: 8px;
@@ -270,6 +345,8 @@ html, body, #root { width: 100%; overflow-x: hidden; }
   font-size: 13px;
   text-decoration: none;
 }
+
+/* Duplicate active style block (same as earlier); safe but redundant */
 .navlink.active {
   background: rgba(37,99,235,0.12);
   color: var(--blue);
