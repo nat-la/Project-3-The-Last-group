@@ -154,7 +154,7 @@ export default function Analyze() {
     <div className="page">
       {/* Spacer: likely used for layout debugging / offsetting from navbar.
           If this is accidental, it can push content down and make the page "look broken". */}
-      <div style={{ height: 600 }} />
+      <div style={{ height: 25 }} />
 
       <PageHeader
         title="Commute Analysis"
