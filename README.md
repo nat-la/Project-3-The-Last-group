@@ -15,22 +15,10 @@ This is a web application that allows users to save commute locations and estima
 * git checkout prototype-2
 
 ### 2. Start backend (FastAPI)
-* cd .../backend
-* python -m venv venv
-* (for mac/linux)
-  * source .venv/bin/activate
-* (for windows)
-  * .venv\Scripts\Activate
-* export GOOGLE_MAPS_API_KEY="YOUR_KEY" <- (mac/linux)
-* setx GOOGLE_MAPS_API_KEY "YOUR_KEY" <- (windows)
-* uvicorn app.api::app --reload --port 8000
+* cd Project-3-The-Last-Group
+* run "python run_dev.py"
 
-### 3. Start frontend (Vite + React)
-* cd .../frontend
-* npm install
-* npm run dev
-
-### 4. Open the application
+### 3. Open the application (auto opens)
 * Frontend: http://localhost:5173
 * Backend: http://127.0.0.1:8000/docs
 
