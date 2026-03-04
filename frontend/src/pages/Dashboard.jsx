@@ -76,7 +76,7 @@ export default function Dashboard() {
     <div className="page">
       {/* Spacer: likely used to offset fixed header/nav.
           If the layout feels “pushed down”, this is a prime suspect. */}
-      <div style={{ height: 340 }} />
+      <div style={{ height: 25 }} />
 
       <PageHeader
         title="Master Your Daily Commute"
