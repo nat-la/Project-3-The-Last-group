@@ -15,7 +15,7 @@ This is a web application that allows users to save commute locations and estima
 * git checkout prototype-2
 
 ### 2. Start backend (FastAPI)
-* cd Project-3-The-Last-Group
+* cd Project-3-The-Last-group
 * run "python run_dev.py"
 
 ### 3. Open the application (auto opens)
