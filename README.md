@@ -28,11 +28,6 @@ This is a web application that allows users to save commute locations and estima
 * run "python run_dev.py"
 
 
-### 3. Start frontend (Vite + React)
-* cd .../frontend
-* npm install
-* npm run dev
-
 ### 4. Open the application
 * Frontend: http://localhost:5173
 * Backend: http://127.0.0.1:8000/docs
