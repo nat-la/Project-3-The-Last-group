@@ -1,0 +1,6 @@
+Basic Manual Testing Checklist, To be done after every push:
+
+- Add Location
+- Delete Location
+- Generate Route between location
+- Navigate interactable Map.

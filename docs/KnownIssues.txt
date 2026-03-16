@@ -1,0 +1,3 @@
+Known Issues:
+
+Main issue is GUI related. On light mode in Google Chrome, the text for buttons: Log Commute, Clear, Add Location, and Delete Location does not appear.

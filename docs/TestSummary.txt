@@ -1,0 +1,7 @@
+Automated testing: Automated testing was handled by the test_api.py that tests the backend functionality of the api.py using pytest. The code tests input validation, stat aggregation, route recommendation, and API functionality. Automated testing was done quite late due to development issues and our performance was admittedly not great failing quite a bit of tests. 
+
+- Last ran 3/15/2026
+
+Manual testing: Manual testing encompassed most of our testing due to development issues. We tested basic functionality including creating and saving locations, creating routes, and generating stats. We also moved frontend testing to be done manually as we found that that was much simpler and quicker. Testing gradually got better as the product improved, and by the bug bash the main issue to solve was getting it to work on all environments. Further manual testing eventually solved the remaining issue (which was not setting up the FastAPI backend properly before running).
+
+- Last ran 3/15/2026
