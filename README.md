@@ -14,7 +14,7 @@ This is a web application that allows users to save commute locations and estima
 * cd Project-3-The-Last-group
 * git checkout prototype-2
 
-### 2. Start backend (FastAPI)
+### 2. Start backend (FastAPI) + Program
 
 * cd .../backend
 * python -m venv venv
