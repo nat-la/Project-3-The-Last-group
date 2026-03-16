@@ -28,7 +28,7 @@ This is a web application that allows users to save commute locations and estima
 * run "python run_dev.py"
 
 
-### 4. Open the application
+### 3. Open the application
 * Frontend: http://localhost:5173
 * Backend: http://127.0.0.1:8000/docs
 
